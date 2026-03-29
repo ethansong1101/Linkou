@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>林口庫存盤點系統 - 標準版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        .low-stock-row { background-color: #fee2e2 !important; color: #b91c1c; font-weight: bold; }
+        .header-bg { background: linear-gradient(135deg, #1e293b 0%, #334155 100%); }
+        .info-text { font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif; }
+        .safety-tag { color: #2563eb; font-size: 0.75rem; font-weight: normal; }
+        .unit-text { font-size: 0.75rem; font-weight: 900; color: #475569; }
+        .iphone-container { max-width: 430px; margin-left: auto; margin-right: auto; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .btn-active:active { transform: scale(0.98); }
+        .checked-item { color: #10b981; font-weight: bold; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-2 info-text">
+
+    <div id="captureArea" class="iphone-container shadow-2xl rounded-2xl overflow-hidden mb-10 bg-white border border-slate-100">
+        <!-- 標題 -->
+        <div class="header-bg text-white p-6 text-center">
+            <h1 class="text-2xl font-bold tracking-widest mb-1">林口庫存盤點系統</h1>
+            <p id="displayDate" class="text-sm opacity-90"></p>
+        </div>
+
+        <div class="p-4">
+            <!-- 人員與動作按鈕 -->
+            <div class="mb-6 border-b-2 border-slate-100 pb-4">
+                <div class="flex items-center mb-4">
+                    <label class="text-xl font-bold mr-2 text-slate-800 whitespace-nowrap">盤點人員：</label>
+                    <input type="text" id="signer" class="text-xl border-b-2 border-slate-300 focus:border-blue-600 outline-none px-1 w-full bg-transparent" placeholder="請填寫姓名">
+                </div>
+                
+                <div class="flex gap-2">
+                    <button onclick="copyData()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-md transition btn-active text-sm">複製回報文字</button>
+                    <button onclick="exportExcel()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg shadow-md transition btn-active text-sm">匯出 Excel</button>
+                </div>
+            </div>
+
+            <!-- 盤點區域 (動態生成) -->
+            <div id="inventoryLists"></div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 盤點品項區域內容
+        const sections = [
+            {
+                name: "白冷凍",
+                alert: true,
+                items: [
+                    { n: "鹽酥杏鮑菇", u: "（包）", s: 3 },
+                    { n: "雞塊", u: "（包）", s: 5 },
+                    { n: "花枝丸", u: "（包）", s: 3 },
+                    { n: "甜不辣", u: "（包）", s: 2 },
+                    { n: "豬排", u: "（黃袋）", s: 10 },
+                    { n: "雞排", u: "（白袋）", s: 5 },
+                    { n: "可樂餅", u: "（袋）", s: 5 },
+                    { n: "奶油", u: "（塊）", s: 5 },
+                    { n: "薯條", u: "（袋）", s: 3 },
+                    { n: "豬五花", u: "（袋）", s: 3 },
+                    { n: "牛五花", u: "（袋）", s: 2 }
+                ]
+            },
+            {
+                name: "四門冰箱-上層左",
+                alert: true,
+                items: [
+                    { n: "炸蝦", u: "（盒）", s: 5 },
+                    { n: "薯條", u: "（小包）", s: 10 }
+                ]
+            },
+            {
+                name: "四門冰箱-上層右",
+                alert: true,
+                items: [
+                    { n: "豬五花", u: "（白袋）", s: 10 },
+                    { n: "牛五花", u: "（黃袋）", s: 5 },
+                    { n: "雞腿肉", u: "（黃袋）", s: 10 }
+                ]
+            },
+            {
+                name: "四門冰箱-下層左",
+                type: "checkbox", // 特殊類型
+                note: "抽屜四格每日下班請補滿<br><span class='text-[10px] opacity-70'>(Vui lòng sử dụng hết cả bốn ngăn kéo sau khi tan làm mỗi ngày.)</span>",
+                leftItems: ["雞塊", "花枝丸", "杏鮑菇"],
+                rightItems: ["甜不辣", "可樂餅", "炸蝦"]
+            },
+            {
+                name: "四門冰箱-下層右",
+                alert: true,
+                items: [
+                    { n: "豬排", u: "（黃袋）", s: 10 },
+                    { n: "雞排", u: "（白袋）", s: 5 }
+                ]
+            },
+            {
+                name: "四門冰箱-下層",
+                alert: true,
+                items: [
+                    { n: "高麗菜", u: "（袋）", s: 6 },
+                    { n: "豆芽麵", u: "（袋）", s: 20 }
+                ]
+            },
+            {
+                name: "工作台冰箱",
+                alert: true,
+                items: [
+                    { n: "豆漿有糖", u: "（紅）", s: 10 },
+                    { n: "豆漿有糖", u: "（藍）", s: 10 },
+                    { n: "紅蘿波絲", u: "（包）", s: 4 },
+                    { n: "洋蔥絲", u: "（包）", s: 4 },
+                    { n: "杏鮑菇", u: "（包）", s: 10 },
+                    { n: "美乃滋醬", u: "（罐）", s: 3 },
+                    { n: "明太子醬", u: "（罐）", s: 3 },
+                    { n: "XO醬", u: "（罐）", s: 5 },
+                    { n: "辣椒醬", u: "（罐）", s: 5 },
+                    { n: "番茄醬", u: "（包）", s: 5 }
+                ]
+            },
+            {
+                name: "備品",
+                alert: true,
+                items: [
+                    { n: "902碗", u: "（箱）", s: 2 },
+                    { n: "902蓋", u: "（箱）", s: 2 },
+                    { n: "唐揚雞粉", u: "（罐）", s: 5 },
+                    { n: "柴魚片", u: "（包）", s: 3 },
+                    { n: "辣椒絲", u: "（包）", s: 2 },
+                    { n: "新鍋子", u: "（個）", s: 3 },
+                    { n: "白袋", u: "（包）", s: 3 },
+                    { n: "黃袋", u: "（包）", s: 3 },
+                    { n: "橘袋", u: "（包）", s: 2 },
+                    { n: "紫袋", u: "（包）", s: 3 },
+                    { n: "LOC 清潔用", u: "（罐）", s: 3 },
+                    { n: "LOC 廚房用", u: "（罐）", s: 2 },
+                    { n: "LOC 洗碗用", u: "（罐）", s: 2 }
+                ]
+            }
+        ];
+
+        // --- 核心邏輯 ---
+        const today = new Date();
+        document.getElementById('displayDate').innerText = `盤點日期：${today.toLocaleDateString('zh-TW', {year: 'numeric', month: 'long', day: 'numeric', weekday: 'long'})}`;
+
+        function toggleCheckbox(el) {
+            const box = el.querySelector('.cb-box');
+            if (box.innerText === "口") {
+                box.innerText = "☑";
+                el.classList.add('checked-item');
+            } else {
+                box.innerText = "口";
+                el.classList.remove('checked-item');
+            }
+        }
+
+        function renderTables() {
+            const container = document.getElementById('inventoryLists');
+            if (sections.length === 0) return; 
+            
+            container.innerHTML = sections.map(sec => {
+                let html = `
+                <div class="mb-8">
+                    <div class="flex flex-col mb-2">
+                        <h2 class="bg-slate-800 px-3 py-1.5 font-bold text-white rounded-lg text-base shadow-sm inline-block self-start">${sec.name}</h2>
+                        ${sec.note ? `<p class="mt-2 text-xs text-orange-600 font-bold bg-orange-50 p-2 rounded border border-orange-100">${sec.note}</p>` : ''}
+                    </div>`;
+
+                if (sec.type === "checkbox") {
+                    html += `
+                    <div class="grid grid-cols-2 gap-4 bg-slate-50 p-3 rounded-lg border border-slate-200" data-sec="${sec.name}">
+                        <div class="flex flex-col gap-3">
+                            <p class="text-[10px] text-slate-400 font-bold border-b mb-1">左抽屜</p>
+                            ${sec.leftItems.map(item => `
+                                <div class="flex items-center gap-2 cursor-pointer py-1" onclick="toggleCheckbox(this)" data-name="${item}">
+                                    <span class="cb-box text-lg font-mono text-slate-400">口</span>
+                                    <span class="text-sm">${item}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="flex flex-col gap-3">
+                            <p class="text-[10px] text-slate-400 font-bold border-b mb-1">右抽屜</p>
+                            ${sec.rightItems.map(item => `
+                                <div class="flex items-center gap-2 cursor-pointer py-1" onclick="toggleCheckbox(this)" data-name="${item}">
+                                    <span class="cb-box text-lg font-mono text-slate-400">口</span>
+                                    <span class="text-sm">${item}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>`;
+                } else if (sec.items && sec.items.length > 0) {
+                    html += `
+                    <table class="w-full text-left border-collapse" data-sec="${sec.name}">
+                        <thead><tr class="text-xs text-gray-400 border-b"><th class="py-2 px-1">品項名稱</th><th class="w-24 text-center">盤點數量</th></tr></thead>
+                        <tbody>${sec.items.map(item => `
+                            <tr class="border-b border-gray-50 last:border-0 transition-colors">
+                                <td class="py-3 px-1">
+                                    <span class="text-gray-800 font-bold text-sm item-name">${item.n}</span>
+                                    <span class="unit-text ml-0.5">${item.u}</span>
+                                    <span class="safety-tag ml-1">最低:${item.s}</span>
+                                </td>
+                                <td class="py-1 text-right">
+                                    <input type="number" class="w-20 border border-gray-200 rounded-lg p-2 text-center font-bold text-blue-800 text-xl focus:border-blue-500 outline-none qty-input-main bg-gray-50" 
+                                    data-name="${item.n}" data-safety="${item.s}" data-alert="${sec.alert}" inputmode="numeric" oninput="validate(this)">
+                                </td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>`;
+                }
+                
+                html += `</div>`;
+                return html;
+            }).join('');
+        }
+
+        function validate(el) {
+            const val = parseFloat(el.value);
+            const safety = parseFloat(el.dataset.safety);
+            const row = el.closest('tr');
+            if (el.dataset.alert === "true" && !isNaN(val) && val < safety) row.classList.add('low-stock-row');
+            else row.classList.remove('low-stock-row');
+        }
+
+        function copyData() {
+            const signer = document.getElementById('signer').value || "未簽名";
+            let text = `📦 【林口店庫存盤點】\n📅 日期：${today.toLocaleDateString()}\n👤 人員：${signer}\n━━━━━━━━━━━━━━\n`;
+            
+            sections.forEach(sec => {
+                text += `\n【${sec.name}】\n`;
+                if (sec.note) {
+                    text += `${sec.note.replace(/<br>/g, '\n').replace(/<[^>]*>/g, '')}\n`;
+                }
+
+                if (sec.type === "checkbox") {
+                    const container = document.querySelector(`div[data-sec="${sec.name}"]`);
+                    container.querySelectorAll('[data-name]').forEach(el => {
+                        const name = el.dataset.name;
+                        // 判斷是否打勾，並套用新的符號要求
+                        const isChecked = el.querySelector('.cb-box').innerText === "☑";
+                        text += `${isChecked ? '✅' : '❎'} ${name}\n`;
+                    });
+                } else {
+                    const table = document.querySelector(`table[data-sec="${sec.name}"]`);
+                    if (table) {
+                        table.querySelectorAll('tbody tr').forEach(row => {
+                            const name = row.querySelector('.item-name').innerText;
+                            const unit = row.querySelector('.unit-text').innerText;
+                            const val = row.querySelector('.qty-input-main').value;
+                            const displayVal = val.trim() !== "" ? val : "";
+                            text += `${row.classList.contains('low-stock-row') ? '🚨' : ''}${name}${unit}：${displayVal}\n`;
+                        });
+                    }
+                }
+            });
+
+            const textArea = document.createElement("textarea");
+            textArea.value = text; 
+            document.body.appendChild(textArea); 
+            textArea.select();
+            document.execCommand('copy'); 
+            document.body.removeChild(textArea);
+            showToast("✅ 已複製全頁資料");
+        }
+
+        function exportExcel() {
+            const exportData = [["林口庫存盤點表"], ["日期", today.toLocaleDateString()], ["人員", document.getElementById('signer').value], [], ["區域", "品項", "數量/狀態", "警示"]];
+            
+            sections.forEach(sec => {
+                if (sec.type === "checkbox") {
+                    const container = document.querySelector(`div[data-sec="${sec.name}"]`);
+                    container.querySelectorAll('[data-name]').forEach(el => {
+                        const isChecked = el.querySelector('.cb-box').innerText === "☑";
+                        exportData.push([sec.name, el.dataset.name, isChecked ? "✅ 已補滿" : "❎ 未勾選", ""]);
+                    });
+                } else {
+                    const table = document.querySelector(`table[data-sec="${sec.name}"]`);
+                    if (table) {
+                        table.querySelectorAll('tbody tr').forEach(row => {
+                            const val = row.querySelector('.qty-input-main').value;
+                            exportData.push([sec.name, row.querySelector('.item-name').innerText, val, row.classList.contains('low-stock-row') ? "不足" : ""]);
+                        });
+                    }
+                }
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(exportData);
+            XLSX.utils.book_append_sheet(wb, ws, "盤點紀錄");
+            XLSX.writeFile(wb, `林口盤點_${today.toISOString().split('T')[0]}.xlsx`);
+        }
+
+        function showToast(msg) {
+            const t = document.createElement('div');
+            t.className = "fixed bottom-10 left-1/2 -translate-x-1/2 bg-black/80 text-white px-6 py-2 rounded-full text-sm z-50 transition-opacity duration-300";
+            t.innerText = msg; document.body.appendChild(t);
+            setTimeout(() => { t.style.opacity = "0"; setTimeout(() => t.remove(), 300); }, 2000);
+        }
+
+        window.onload = () => { 
+            renderTables(); 
+        };
+    </script>
+</body>
+</html>
